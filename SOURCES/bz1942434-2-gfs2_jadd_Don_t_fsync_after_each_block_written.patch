@@ -1,0 +1,54 @@
+commit 11070364f04a111212efcc2604840eee71f32c8f
+Author: Andrew Price <anprice@redhat.com>
+Date:   Thu Mar 18 17:50:16 2021 +0000
+
+    gfs2_jadd: Don't fsync after each block written
+    
+    gfs2_jadd has always called fsync() after writing each block of the
+    journal. There doesn't seem to be any need for that so take the fsync()
+    call out of the loop.
+    
+    Add an additional fsync() after preallocation to make sure we're in good
+    shape before writing the log headers.
+    
+    In my tests this reduces the time to add one journal from 5 minutes to
+    9 seconds.
+    
+    Resolves: rhbz#1942434
+    
+    Signed-off-by: Andrew Price <anprice@redhat.com>
+
+diff --git a/gfs2/mkfs/main_jadd.c b/gfs2/mkfs/main_jadd.c
+index b0cffbac..6aff97c3 100644
+--- a/gfs2/mkfs/main_jadd.c
++++ b/gfs2/mkfs/main_jadd.c
+@@ -531,6 +531,11 @@ static int add_j(struct gfs2_sbd *sdp, struct jadd_opts *opts)
+ 	if (error != 0)
+ 		goto close_fd;
+ 
++	error = fsync(fd);
++	if (error != 0) {
++		perror("Failed to sync journal metadata");
++		goto close_fd;
++	}
+ 	if ((error = lseek(fd, 0, SEEK_SET)) < 0) {
+ 		perror("add_j lseek");
+ 		goto close_fd;
+@@ -574,12 +579,12 @@ static int add_j(struct gfs2_sbd *sdp, struct jadd_opts *opts)
+ 			seq = 0;
+ 		off += sdp->bsize;
+ 
+-		if ((error = fsync(fd))) {
+-			perror("add_j fsync");
+-			goto close_fd;
+-		}
+ 	}
+-
++	error = fsync(fd);
++	if (error != 0) {
++		perror("Failed to sync journal metadata");
++		goto close_fd;
++	}
+ 	sprintf(new_name, "journal%u", opts->journals);
+ 	error = rename2system(opts, opts->jindex, new_name);
+ 	if (error < 0 && errno != EEXIST){
