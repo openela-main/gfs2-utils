@@ -1,0 +1,41 @@
+commit b33f8871a821b7f0461dec89f0066a9cb6aa1c71
+Author: Andrew Price <anprice@redhat.com>
+Date:   Wed May 27 12:31:58 2020 +0100
+
+    mkfs.gfs2: Don't use i/o limits hints <4K for block size
+    
+    Some devices report an optimal_io_size less than 4K. Currently mkfs.gfs2
+    uses the non-zero value to choose the block size, which is almost
+    certainly a bad choice when it's less than 4K. Update choose_blocksize()
+    to avoid using device topology hints for the block size choice when
+    they're less than the default block size (4K). Test case included.
+    
+    Resolves: rhbz#1839219
+    Signed-off-by: Andrew Price <anprice@redhat.com>
+
+diff --git a/gfs2/mkfs/main_mkfs.c b/gfs2/mkfs/main_mkfs.c
+index 846b341f..412d4701 100644
+--- a/gfs2/mkfs/main_mkfs.c
++++ b/gfs2/mkfs/main_mkfs.c
+@@ -505,7 +505,7 @@ static unsigned choose_blocksize(struct mkfs_opts *opts)
+ 	}
+ 	if (!opts->got_bsize && got_topol) {
+ 		if (dev->optimal_io_size <= getpagesize() &&
+-		    dev->optimal_io_size >= dev->minimum_io_size)
++		    dev->optimal_io_size >= GFS2_DEFAULT_BSIZE)
+ 			bsize = dev->optimal_io_size;
+ 		else if (dev->physical_sector_size <= getpagesize() &&
+ 		         dev->physical_sector_size >= GFS2_DEFAULT_BSIZE)
+diff --git a/tests/mkfs.at b/tests/mkfs.at
+index 57785a0d..4c8b2249 100644
+--- a/tests/mkfs.at
++++ b/tests/mkfs.at
+@@ -112,6 +112,8 @@ AT_CLEANUP
+ AT_SETUP([Device i/o limits handling])
+ AT_KEYWORDS(mkfs.gfs2 mkfs)
+ AT_CHECK([$GFS_MKFS -p lock_nolock -o test_topology=0:0:0:0:0 $GFS_TGT], 0, [ignore], [ignore])
++AT_CHECK([$GFS_MKFS -p lock_nolock -o test_topology=0:512:512:512:512 $GFS_TGT], 0, [ignore], [ignore])
++AT_CHECK([gfs2_edit -p sb field sb_bsize $GFS_TGT | tr -d '\n' ], 0, [4096], [ignore])
+ AT_CHECK([$GFS_MKFS -p lock_nolock -o test_topology=7168:512:0:33553920:512 $GFS_TGT], 0, [ignore], [ignore])
+ AT_CHECK([$GFS_MKFS -p lock_nolock -o test_topology=7168:512:8192:33553920:512 $GFS_TGT], 0, [ignore], [Warning: device is not properly aligned. This may harm performance.
+ ])

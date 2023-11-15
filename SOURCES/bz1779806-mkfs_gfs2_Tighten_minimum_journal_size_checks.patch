@@ -1,0 +1,55 @@
+commit ea571e0e9f8f72b30732e1c2a43a09247c3eedd9
+Author: Andrew Price <anprice@redhat.com>
+Date:   Fri Aug 28 11:30:24 2020 +0100
+
+    mkfs.gfs2: Tighten minimum journal size checks
+    
+    mkfs.gfs2 chooses the default journal size based on the block size and
+    the size of the target device, and when the device is small enough a
+    minimum journal size is enforced. If the block size is less than 4K and
+    the device is small enough a journal size can be chosen that is smaller
+    than the minimum and gfs2 will not mount it, as it has a hardcoded check
+    for >=8MB journals. To avoid that we can just clamp the journal size
+    back to 8MB in these cases. A validity check for the minimum has already
+    been done in default_journal_size().
+    
+    Resolves: rhbz#1779806
+    
+    Signed-off-by: Andrew Price <anprice@redhat.com>
+
+diff --git a/gfs2/mkfs/main_mkfs.c b/gfs2/mkfs/main_mkfs.c
+index 3fb2eb92..df194dff 100644
+--- a/gfs2/mkfs/main_mkfs.c
++++ b/gfs2/mkfs/main_mkfs.c
+@@ -929,11 +929,17 @@ static void sbd_init(struct gfs2_sbd *sdp, struct mkfs_opts *opts, unsigned bsiz
+ 	   will fit. For user-provided journal sizes, limit it to half of the fs. */
+ 	if (!opts->got_jsize) {
+ 		int default_jsize = default_journal_size(sdp->bsize, sdp->device.length / opts->journals);
++		unsigned jsize_mb;
++
+ 		if (default_jsize < 0) {
+ 			fprintf(stderr, _("gfs2 will not fit on this device.\n"));
+ 			exit(1);
+ 		}
+-		opts->jsize = (default_jsize * sdp->bsize) >> 20;
++		jsize_mb = (default_jsize * sdp->bsize) >> 20;
++		if (jsize_mb < GFS2_MIN_JSIZE)
++			opts->jsize = GFS2_MIN_JSIZE;
++		else
++			opts->jsize = jsize_mb;
+ 	} else if ((((opts->jsize * opts->journals) << 20) / sdp->bsize) > (sdp->device.length / 2)) {
+ 		unsigned max_jsize = (sdp->device.length / 2 * sdp->bsize / opts->journals) >> 20;
+ 
+diff --git a/tests/mkfs.at b/tests/mkfs.at
+index 96c4f6ab..73cdfee6 100644
+--- a/tests/mkfs.at
++++ b/tests/mkfs.at
+@@ -78,6 +78,8 @@ AT_CLEANUP
+ AT_SETUP([Min. journal size])
+ AT_KEYWORDS(mkfs.gfs2 mkfs)
+ GFS_FSCK_CHECK([$GFS_MKFS -p lock_nolock -J 8 $GFS_TGT])
++GFS_FSCK_CHECK([$GFS_MKFS -p lock_nolock -b 1024 $GFS_TGT 511996])
++AT_CHECK([gfs2_edit -p journal0 field di_size $GFS_TGT | tr -d '\n'], 0, [8388608], [ignore])
+ AT_CLEANUP
+ 
+ AT_SETUP([Max. quota change file size])
