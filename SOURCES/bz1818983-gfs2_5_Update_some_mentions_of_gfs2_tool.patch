@@ -1,0 +1,31 @@
+commit 6a5d984b2d5deb989faae2ce567e886b400f257d
+Author: Andrew Price <anprice@redhat.com>
+Date:   Tue Apr 7 15:25:06 2020 +0100
+
+    gfs2.5: Update some mentions of gfs2_tool
+    
+    Resolves: rhbz#1818983
+    Signed-off-by: Andrew Price <anprice@redhat.com>
+
+diff --git a/gfs2/man/gfs2.5 b/gfs2/man/gfs2.5
+index 436abc09..8f67ce23 100644
+--- a/gfs2/man/gfs2.5
++++ b/gfs2/man/gfs2.5
+@@ -48,7 +48,7 @@ currently these are \fIlock_nolock\fR and \fIlock_dlm\fR.
+ 
+ The default lock protocol name is written to disk initially when creating the
+ filesystem with \fBmkfs.gfs2\fP(8), -p option.  It can be changed on-disk by
+-using the \fBgfs2_tool\fP(8) utility's \fBsb proto\fP command.
++using the \fBtunegfs2\fP(8) command.
+ 
+ The \fBlockproto\fP mount option should be used only under special
+ circumstances in which you want to temporarily use a different lock protocol
+@@ -70,7 +70,7 @@ The format of \fILockTableName\fR is lock-module-specific.  For
+ 
+ The default cluster/filesystem name is written to disk initially when creating
+ the filesystem with \fBmkfs.gfs2\fP(8), -t option.  It can be changed on-disk
+-by using the \fBgfs2_tool\fP(8) utility's \fBsb table\fP command.
++by using the \fBtunegfs2\fP(8) command.
+ 
+ The \fBlocktable\fP mount option should be used only under special
+ circumstances in which you want to mount the filesystem in a different cluster,

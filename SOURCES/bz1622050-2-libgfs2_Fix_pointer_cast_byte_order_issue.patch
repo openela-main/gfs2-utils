@@ -1,0 +1,47 @@
+commit 57553571df2f33ec45a81fa5599873ddfc890c92
+Author: Andrew Price <anprice@redhat.com>
+Date:   Thu Sep 6 14:28:19 2018 +0100
+
+    libgfs2: Fix pointer cast byte order issue
+    
+    lgfs2_field_assign() currently uses pointer casting to achieve generic
+    integer assignment based on the width of the field, but this is broken
+    as a uin32_t field can be assigned the value from the high bytes of the
+    uint64_t value, for instance. To fix this, store the value into a
+    uint64_t before casting to the narrower types.
+    
+    Signed-off-by: Andrew Price <anprice@redhat.com>
+
+diff --git a/gfs2/libgfs2/meta.c b/gfs2/libgfs2/meta.c
+index a8289466..e0ea4912 100644
+--- a/gfs2/libgfs2/meta.c
++++ b/gfs2/libgfs2/meta.c
+@@ -940,6 +940,7 @@ int lgfs2_field_str(char *str, const size_t size, const char *blk, const struct
+ int lgfs2_field_assign(char *blk, const struct lgfs2_metafield *field, const void *val)
+ {
+ 	char *fieldp = blk + field->offset;
++	uint64_t num = *(uint64_t *)val;
+ 
+ 	if (field->flags & LGFS2_MFF_UUID) {
+ 		memcpy(fieldp, val, 16);
+@@ -959,16 +960,16 @@ int lgfs2_field_assign(char *blk, const struct lgfs2_metafield *field, const voi
+ 
+ 	switch(field->length) {
+ 	case sizeof(uint8_t):
+-		*fieldp = *(uint8_t *)val;
++		*fieldp = (uint8_t)num;
+ 		return 0;
+ 	case sizeof(uint16_t):
+-		*(uint16_t *)fieldp = cpu_to_be16(*(uint16_t *)val);
++		*(uint16_t *)fieldp = cpu_to_be16((uint16_t)num);
+ 		return 0;
+ 	case sizeof(uint32_t):
+-		*(uint32_t *)fieldp = cpu_to_be32(*(uint32_t *)val);
++		*(uint32_t *)fieldp = cpu_to_be32((uint32_t)num);
+ 		return 0;
+ 	case sizeof(uint64_t):
+-		*(uint64_t *)fieldp = cpu_to_be64(*(uint64_t *)val);
++		*(uint64_t *)fieldp = cpu_to_be64((uint64_t)num);
+ 		return 0;
+ 	default:
+ 		/* Will never happen */

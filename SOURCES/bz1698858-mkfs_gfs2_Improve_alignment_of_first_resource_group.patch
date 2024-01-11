@@ -1,0 +1,47 @@
+commit 12a82c8661b003736a0cb14fe042605f2412c329
+Author: Andrew Price <anprice@redhat.com>
+Date:   Thu Apr 25 11:21:22 2019 +0100
+
+    mkfs.gfs2: Improve alignment of first resource group
+    
+    Currently the first rgrp is aligned to the whole stripe width and the
+    second rgrp is aligned to (stripe width + 1 stripe unit) and so on, to
+    spread them across an array. However, that means that there could be a
+    large amount of space wasted between the superblock and the first
+    resource group, and can result in the iovec used to zero that space
+    exceeding IOV_MAX and failing mkfs.gfs2 (since 6cefaf33d5) if the array
+    has a sufficiently large number of LUNs. Instead, align the first
+    resource group to a stripe unit so that the gap is minimised. Resource
+    groups are still spread across the array as the alignment of subsequent
+    ones are handled separately.
+    
+    Resolves: rhbz#1698858
+    
+    Signed-off-by: Andrew Price <anprice@redhat.com>
+
+diff --git a/gfs2/libgfs2/rgrp.c b/gfs2/libgfs2/rgrp.c
+index 3cdaccae..20ce5807 100644
+--- a/gfs2/libgfs2/rgrp.c
++++ b/gfs2/libgfs2/rgrp.c
+@@ -332,7 +332,7 @@ static uint64_t align_block(const uint64_t base, const uint64_t align)
+  */
+ uint64_t lgfs2_rgrp_align_addr(const lgfs2_rgrps_t rgs, uint64_t addr)
+ {
+-	return align_block(addr, rgs->align);
++	return align_block(addr, rgs->align_off);
+ }
+ 
+ /**
+diff --git a/tests/mkfs.at b/tests/mkfs.at
+index 2739561f..57785a0d 100644
+--- a/tests/mkfs.at
++++ b/tests/mkfs.at
+@@ -122,6 +122,8 @@ AT_KEYWORDS(mkfs.gfs2 mkfs)
+ AT_CHECK([$GFS_MKFS -p lock_nolock -o test_topology=0:512:65536:393216:512 $GFS_TGT], 0, [ignore], [ignore])
+ # Check rgrp alignment to minimum_io_size: 65536 / 4096 == 16
+ AT_CHECK([gfs2_edit -p rindex $GFS_TGT | grep ri_addr | awk '{print $2, $2 % 16; if ($2 % 16 != 0) { exit 1 }}'], 0, [ignore], [ignore])
++# rhbz#1698858
++AT_CHECK([$GFS_MKFS -p lock_nolock -o test_topology=0:512:131072:6291456:512 $GFS_TGT], 0, [ignore], [ignore])
+ AT_CLEANUP
+ 
+ AT_SETUP([Values of rg_skip])

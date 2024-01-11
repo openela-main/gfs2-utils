@@ -1,0 +1,130 @@
+commit 47261faa39aca05d6feb486fdeec26f8ffc3ef15
+Author: Andrew Price <anprice@redhat.com>
+Date:   Fri Aug 17 12:49:24 2018 +0100
+
+    fsck.gfs2: Don't check fs formats we don't recognise
+    
+    Currently fsck.gfs2 will ignore sb_fs_format but in order to support
+    future formats we need to make sure it doesn't try to check filesystems
+    with formats we don't recognise yet. Better late than never.
+    
+    Tests included.
+    
+    rhbz#1616389
+    rhbz#1622050
+    
+    Signed-off-by: Andrew Price <anprice@redhat.com>
+
+diff --git a/gfs2/fsck/fsck.h b/gfs2/fsck/fsck.h
+index d3f76352..877448c3 100644
+--- a/gfs2/fsck/fsck.h
++++ b/gfs2/fsck/fsck.h
+@@ -4,6 +4,8 @@
+ #include "libgfs2.h"
+ #include "osi_tree.h"
+ 
++#define FSCK_MAX_FORMAT (1801)
++
+ #define FSCK_HASH_SHIFT         (13)
+ #define FSCK_HASH_SIZE          (1 << FSCK_HASH_SHIFT)
+ #define FSCK_HASH_MASK          (FSCK_HASH_SIZE - 1)
+diff --git a/gfs2/fsck/initialize.c b/gfs2/fsck/initialize.c
+index ebe62b9f..d1c620af 100644
+--- a/gfs2/fsck/initialize.c
++++ b/gfs2/fsck/initialize.c
+@@ -1334,12 +1334,12 @@ static int fill_super_block(struct gfs2_sbd *sdp)
+ 	if (sizeof(struct gfs2_sb) > sdp->sd_sb.sb_bsize){
+ 		log_crit( _("GFS superblock is larger than the blocksize!\n"));
+ 		log_debug("sizeof(struct gfs2_sb) > sdp->sd_sb.sb_bsize\n");
+-		return -1;
++		return FSCK_ERROR;
+ 	}
+ 
+ 	if (compute_constants(sdp)) {
+ 		log_crit("%s\n", _("Failed to compute file system constants"));
+-		exit(FSCK_ERROR);
++		return FSCK_ERROR;
+ 	}
+ 	ret = read_sb(sdp);
+ 	if (ret < 0) {
+@@ -1348,10 +1348,15 @@ static int fill_super_block(struct gfs2_sbd *sdp)
+ 		/* Now that we've tried to repair it, re-read it. */
+ 		ret = read_sb(sdp);
+ 		if (ret < 0)
+-			return -1;
++			return FSCK_ERROR;
+ 	}
+ 	if (sdp->gfs1)
+ 		sbd1 = (struct gfs_sb *)&sdp->sd_sb;
++	else if (sdp->sd_sb.sb_fs_format > FSCK_MAX_FORMAT) {
++		log_crit(_("Unsupported gfs2 format found: %"PRIu32"\n"), sdp->sd_sb.sb_fs_format);
++		log_crit(_("A newer fsck.gfs2 is required to check this file system.\n"));
++		return FSCK_USAGE;
++	}
+ 	return 0;
+ }
+ 
+@@ -1556,6 +1561,7 @@ int initialize(struct gfs2_sbd *sdp, int force_check, int preen,
+ 	       int *all_clean)
+ {
+ 	int clean_journals = 0, open_flag;
++	int err;
+ 
+ 	*all_clean = 0;
+ 
+@@ -1601,8 +1607,9 @@ int initialize(struct gfs2_sbd *sdp, int force_check, int preen,
+ 	}
+ 
+ 	/* read in sb from disk */
+-	if (fill_super_block(sdp))
+-		return FSCK_ERROR;
++	err = fill_super_block(sdp);
++	if (err != FSCK_OK)
++		return err;
+ 
+ 	/* Change lock protocol to be fsck_* instead of lock_* */
+ 	if (!opts.no && preen_is_safe(sdp, preen, force_check)) {
+diff --git a/gfs2/libgfs2/super.c b/gfs2/libgfs2/super.c
+index 6e7d8c23..75925643 100644
+--- a/gfs2/libgfs2/super.c
++++ b/gfs2/libgfs2/super.c
+@@ -29,11 +29,18 @@ int check_sb(struct gfs2_sb *sb)
+ 		errno = EIO;
+ 		return -1;
+ 	}
++	/* Check for gfs1 */
+ 	if (sb->sb_fs_format == GFS_FORMAT_FS &&
+ 	    sb->sb_header.mh_format == GFS_FORMAT_SB &&
+ 	    sb->sb_multihost_format == GFS_FORMAT_MULTI) {
+ 		return 1;
+ 	}
++	/* It's gfs2. Check format number is in a sensible range. */
++	if (sb->sb_fs_format < GFS2_FORMAT_FS ||
++	    sb->sb_fs_format > 1899) {
++		errno = EINVAL;
++		return -1;
++	}
+ 	return 2;
+ }
+ 
+diff --git a/tests/fsck.at b/tests/fsck.at
+index 39a04d04..97a00a90 100644
+--- a/tests/fsck.at
++++ b/tests/fsck.at
+@@ -54,3 +54,16 @@ AT_CHECK([gfs2_edit -p journal0 field di_header.mh_magic 0 $GFS_TGT], 0, [ignore
+ AT_CHECK([fsck.gfs2 -y $GFS_TGT], 1, [ignore], [ignore])
+ AT_CHECK([fsck.gfs2 -n $GFS_TGT], 0, [ignore], [ignore])
+ AT_CLEANUP
++
++AT_SETUP([gfs2 format versions])
++AT_KEYWORDS(fsck.gfs2 fsck)
++GFS_TGT_REGEN
++AT_CHECK([mkfs.gfs2 -O -p lock_nolock ${GFS_TGT}], 0, [ignore], [ignore])
++AT_CHECK([echo "set sb { sb_fs_format: 1802 }" | gfs2l ${GFS_TGT}], 0, [ignore], [ignore])
++# Unsupported format, FSCK_USAGE == 16
++AT_CHECK([fsck.gfs2 -y $GFS_TGT], 16, [ignore], [ignore])
++# Format out of range
++AT_CHECK([echo "set sb { sb_fs_format: 4242 }" | gfs2l ${GFS_TGT}], 0, [ignore], [ignore])
++AT_CHECK([fsck.gfs2 -y $GFS_TGT], 1, [ignore], [ignore])
++AT_CHECK([fsck.gfs2 -n $GFS_TGT], 0, [ignore], [ignore])
++AT_CLEANUP
