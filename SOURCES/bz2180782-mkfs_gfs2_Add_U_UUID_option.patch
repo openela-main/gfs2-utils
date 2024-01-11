@@ -1,0 +1,134 @@
+commit 60e7c2bfcb23ddfcf2f63d8d8a700e871071a574
+Author: Andrew Price <anprice@redhat.com>
+Date:   Thu Jul 14 13:20:39 2022 +0100
+
+    mkfs.gfs2: Add -U UUID option
+    
+    Allow the user to specify the filesystem UUID, similar to mkfs.ext4's -U
+    option.
+    
+    Resolves: rhbz#2180782
+    
+    Signed-off-by: Andrew Price <anprice@redhat.com>
+
+diff --git a/gfs2/man/mkfs.gfs2.8 b/gfs2/man/mkfs.gfs2.8
+index 35e355a5..f4fd33f3 100644
+--- a/gfs2/man/mkfs.gfs2.8
++++ b/gfs2/man/mkfs.gfs2.8
+@@ -120,6 +120,12 @@ unique file system name used to distinguish this gfs2 file system.  Valid
+ \fIclustername\fRs and \fIlockspace\fRs may only contain alphanumeric
+ characters, hyphens (-) and underscores (_).
+ .TP
++\fB-U\fP \fIUUID\fR
++Specify the filesystem UUID. The argument must be string of hexadecimal digits
++separated by hyphens, of the form "1b4e28ba-2fa1-11d2-883f-b9a761bde3fb". If
++this option is omitted, the filesystem's UUID is randomly generated. Note that
++no attempt is made to prevent UUID clashes between filesystems.
++.TP
+ \fB-V\fP
+ Print program version information, then exit.
+ .TP
+diff --git a/gfs2/mkfs/main_mkfs.c b/gfs2/mkfs/main_mkfs.c
+index 09e756fb..c661abae 100644
+--- a/gfs2/mkfs/main_mkfs.c
++++ b/gfs2/mkfs/main_mkfs.c
+@@ -55,6 +55,7 @@ static void print_usage(const char *prog_name)
+ 	    "-q", NULL,          _("Don't print anything"),
+ 	    "-r", _("<size>"),   _("Size of resource groups, in megabytes"),
+ 	    "-t", _("<name>"),   _("Name of the lock table"),
++	    "-U", _("<UUID>"),   _("The UUID of the file system"),
+ 	    "-V", NULL,          _("Display program version information, then exit"),
+ 	    NULL, NULL, NULL /* Must be kept at the end */
+ 	};
+@@ -122,6 +123,7 @@ struct mkfs_opts {
+ 	uint32_t journals;
+ 	const char *lockproto;
+ 	const char *locktable;
++	const char *uuid;
+ 	struct mkfs_dev dev;
+ 	unsigned discard:1;
+ 
+@@ -137,6 +139,7 @@ struct mkfs_opts {
+ 	unsigned got_locktable:1;
+ 	unsigned got_device:1;
+ 	unsigned got_topol:1;
++	unsigned got_uuid:1;
+ 
+ 	unsigned override:1;
+ 	unsigned quiet:1;
+@@ -321,7 +324,7 @@ static void opts_get(int argc, char *argv[], struct mkfs_opts *opts)
+ {
+ 	int c;
+ 	while (1) {
+-		c = getopt(argc, argv, "-b:c:DhJ:j:KOo:p:qr:t:V");
++		c = getopt(argc, argv, "-b:c:DhJ:j:KOo:p:qr:t:U:V");
+ 		if (c == -1)
+ 			break;
+ 
+@@ -373,6 +376,10 @@ static void opts_get(int argc, char *argv[], struct mkfs_opts *opts)
+ 		case 'o':
+ 			opt_parse_extended(optarg, opts);
+ 			break;
++		case 'U':
++			opts->uuid = optarg;
++			opts->got_uuid = 1;
++			break;
+ 		case 'V':
+ 			printf("mkfs.gfs2 %s (built %s %s)\n", VERSION,
+ 			       __DATE__, __TIME__);
+@@ -1030,6 +1037,28 @@ static void open_dev(struct mkfs_dev *dev, int withprobe)
+ 		exit(1);
+ }
+ 
++static void sb_init(struct gfs2_sb *sb, unsigned bsize, struct mkfs_opts *opts)
++{
++	memset(sb, 0, sizeof(struct gfs2_sb));
++	sb->sb_header.mh_magic = GFS2_MAGIC;
++	sb->sb_header.mh_type = GFS2_METATYPE_SB;
++	sb->sb_header.mh_format = GFS2_FORMAT_SB;
++	sb->sb_fs_format = GFS2_FORMAT_FS;
++	sb->sb_multihost_format = GFS2_FORMAT_MULTI;
++	sb->sb_bsize = bsize;
++	sb->sb_bsize_shift = ffs(bsize) - 1;
++#ifdef GFS2_HAS_UUID
++	if (opts->got_uuid) {
++		int err = uuid_parse(opts->uuid, sb->sb_uuid);
++		if (err != 0) {
++			fprintf(stderr, _("Failed to parse UUID option."));
++			exit(1);
++		}
++	} else
++		uuid_generate(sb->sb_uuid);
++#endif
++}
++
+ int main(int argc, char *argv[])
+ {
+ 	struct gfs2_sbd sbd;
+@@ -1056,7 +1085,7 @@ int main(int argc, char *argv[])
+ 	}
+ 
+ 	sbd_init(&sbd, &opts, bsize);
+-	lgfs2_sb_init(&sb, bsize);
++	sb_init(&sb, bsize, &opts);
+ 	if (opts.debug) {
+ 		printf(_("File system options:\n"));
+ 		printf("  bsize = %u\n", sbd.bsize);
+diff --git a/tests/mkfs.at b/tests/mkfs.at
+index e7ce8e80..95e1aed2 100644
+--- a/tests/mkfs.at
++++ b/tests/mkfs.at
+@@ -171,3 +171,13 @@ GFS_TGT_SIZE(64M)
+ AT_CHECK([$GFS_MKFS -p lock_nolock -j2 $GFS_TGT], 0, [ignore], [ignore])
+ AT_CHECK([fsck.gfs2 -n $GFS_TGT], 0, [ignore], [ignore])
+ AT_CLEANUP
++
++AT_SETUP([UUID option])
++AT_KEYWORDS(mkfs.gfs2 mkfs)
++GFS_TGT_REGEN
++AT_CHECK([$GFS_MKFS -p lock_nolock $GFS_TGT -U], 1, [ignore], [ignore])
++AT_CHECK([$GFS_MKFS -p lock_nolock -U 42 $GFS_TGT], 1, [ignore], [ignore])
++AT_CHECK([$GFS_MKFS -p lock_nolock -U 1b4e28ba-2fa1-11d2-883f-b9a761bde3fb4 $GFS_TGT], 1, [ignore], [ignore])
++AT_CHECK([$GFS_MKFS -p lock_nolock -U 1b4e28ba-2fa1-11d2-883f-b9a761bde3f $GFS_TGT], 1, [ignore], [ignore])
++GFS_FSCK_CHECK([$GFS_MKFS -p lock_nolock -U 1b4e28ba-2fa1-11d2-883f-b9a761bde3fb $GFS_TGT])
++AT_CLEANUP

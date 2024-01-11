@@ -12,7 +12,7 @@
 
 Name: gfs2-utils
 Version: 3.2.0
-Release: 11%{?dist}
+Release: 13%{?dist}
 License: GPLv2+ and LGPLv2+
 Group: System Environment/Kernel
 Summary: Utilities for managing the global file system (GFS2)
@@ -46,7 +46,7 @@ Patch9: bz1818983-gfs2_5_Update_some_mentions_of_gfs2_tool.patch
 Patch10: bz1779806-mkfs_gfs2_Tighten_minimum_journal_size_checks.patch
 Patch11: bz1942434-1-gfs2_jadd_Use_fallocate_to_preallocate_journals.patch
 Patch12: bz1942434-2-gfs2_jadd_Don_t_fsync_after_each_block_written.patch
-
+Patch13: bz2180782-mkfs_gfs2_Add_U_UUID_option.patch
 
 %prep
 %setup -q -n gfs2-utils-%{version}
@@ -63,7 +63,7 @@ Patch12: bz1942434-2-gfs2_jadd_Don_t_fsync_after_each_block_written.patch
 %patch10 -p1 -b .bz1779806-mkfs_gfs2_Tighten_minimum_journal_size_checks
 %patch11 -p1 -b .bz1942434-1-gfs2_jadd_Use_fallocate_to_preallocate_journals
 %patch12 -p1 -b .bz1942434-2-gfs2_jadd_Don_t_fsync_after_each_block_written
-
+%patch13 -p1 -b .bz2180782-mkfs_gfs2_Add_U_UUID_option
 
 %build
 ./autogen.sh
@@ -103,6 +103,14 @@ modifying, and correcting inconsistencies in GFS2 file systems.
 %{_prefix}/lib/udev/rules.d/82-gfs2-withdraw.rules
 
 %changelog
+* Tue Mar 28 2023 Andrew Price <anprice@redhat.com> - 3.2.0-13
+- Re-add tests that were dropped in the c8s migration
+  Resolves: rhbz#2180782
+
+* Tue Mar 28 2023 Andrew Price <anprice@redhat.com> - 3.2.0-12
+- mkfs.gfs2: Add -U UUID option
+  Resolves: rhbz#2180782
+
 * Wed Mar 24 2021 Andrew Price <anprice@redhat.com> - 3.2.0-11
 - gfs2_jadd: Use fallocate to preallocate journals
 - gfs2_jadd: Don't fsync after each block written
